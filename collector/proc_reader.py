@@ -31,21 +31,26 @@ def read_cpu_stats() -> dict[str, dict[str, int]]: # we are returning cpu n and 
     return stats
 
 
-def read_memory_stats() -> dict:
-    """
-    Parse /proc/meminfo to extract total, available, used memory.
-    Each line is: 'FieldName:   value kB'
-    """
+def read_memory_stats() -> dict[str,int]:
+    """Parse /proc/meminfo to extract total, available, used memory.Each line is: 'FieldName: value kB'"""
+    memStats = {}
+
     path = Path("/proc/meminfo")
-    # TODO: implement this
-    pass
+    with path.open("r") as file:
+        for f in file:
+            parts = f.split() #split on spaces
+            if len(parts) >= 2:
+                key = parts[0].rstrip(":") # we split the name of the mem stat and store it in key using right strip
+                memStats[key] = int(parts[1]) # then in the dict use key as the key and stats as the val for the dict
+
+    totalMemory = memStats.get("MemTotal", 0) # we use exact names MemTotal to get the value from the dictionary (avoids crashing if we use .get)
+    AvailableMemory = memStats.get("MemAvailable", 0)
+
+    return {"Total": totalMemory,"Available memory": AvailableMemory,"Used":totalMemory - AvailableMemory}
 
 
 def collect_snapshot() -> dict:
-    """
-    Returns a single structured snapshot of current system state.
-    This is what eventually gets written to the ring buffer and then TimescaleDB.
-    """
+    """Returns a single structured snapshot of current system state.This is what eventually gets written to the ring buffer and then TimescaleDB."""
     return {
         "timestamp": time.time(),
         "cpu": read_cpu_stats(),
