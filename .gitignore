@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+01-PRD.md
+02-Technical-Design.md
+03-Roadmap.md
