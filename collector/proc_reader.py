@@ -3,34 +3,40 @@ import time
 from pathlib import Path
 
 
-def get_raw_ticks() -> dict[str, dict[str, int]]: # we are returning cpu n and then the inner dict (name stat name (str) followed by value (int))
-    """ Parse /proc/stat to extract CPU usage percentages. /proc/stat gives cumulative CPU ticks since boot — you need two snapshots and a delta to calculate actual usage %.
-    Returns raw tick counts on first call; call twice with a sleep in between to get meaningful percentages."""
+# ─────────────────────────────────────────────
+# CPU
+# ─────────────────────────────────────────────
 
-    columns = ["user", "nice", "system", "idle", "iowait", "irq", "softirq", "steal", "guest", "guest_nice"]
+def get_raw_ticks() -> dict[str, dict[str, int]]:
+    """
+    Parse /proc/stat and return raw cumulative CPU tick counts since boot.
+    Call twice with a sleep in between to compute meaningful usage percentages.
+    """
+    columns = ["user", "nice", "system", "idle", "iowait",
+               "irq", "softirq", "steal", "guest", "guest_nice"]
     stats = {}
 
-    path = Path("/proc/stat") # we use the file where the results are stored as the path
-    with path.open("r") as file: # open the file as read only 
-        for f in file:
-            if not f.startswith("cpu"): # if the line doesn't start with cpu we skip the line
+    path = Path("/proc/stat")
+    with path.open("r") as file:
+        for line in file:
+            if not line.startswith("cpu"): # skip non-cpu lines
                 continue
-        
-            parts = f.split() # split the line as space as the delimiter
-            cpuName = parts[0] # the output starts with the number of the cpu (cpu 1/2/3/4/etc)
-            values = []
 
-            for val in parts[1:]: # we skip the CPU name and start from the first metric
-                convertedVal = int(val) # we convert that metric into int
-                values.append(convertedVal) # then append that value in the list
+            parts = line.split()
+            cpu_name = parts[0] # 'cpu', 'cpu0', 'cpu1', etc.
 
-            ''' we now use zip to combine 2 lists into 1, using columns as the key and values as well the values in the dict
-            all of it is then stored into a nested dict stats where the stats for each cpu are stored in the dict '''
-            stats[cpuName] = dict(zip(columns, values)) 
+            # convert tick values to ints and zip with column names into a dict
+            values = [int(val) for val in parts[1:]]
+            stats[cpu_name] = dict(zip(columns, values))
 
     return stats
 
-def read_cpu_stats(interval: float=0.1) -> dict[str, float]: # Fixed 'string' to 'str'
+
+def read_cpu_stats(interval: float = 1.0) -> dict[str, float]:
+    """
+    Return CPU usage % for overall + each core.
+    Takes two /proc/stat snapshots `interval` seconds apart to compute delta.
+    """
     stat1 = get_raw_ticks()
     time.sleep(interval)
     stat2 = get_raw_ticks()
@@ -44,139 +50,193 @@ def read_cpu_stats(interval: float=0.1) -> dict[str, float]: # Fixed 'string' to
         s1 = stat1[cpu]
         s2 = stat2[cpu]
 
-        # idle time comprises of idle + iowait
+        # idle time = idle + iowait (CPU is blocked, not doing useful work)
         idle1 = s1["idle"] + s1["iowait"]
         idle2 = s2["idle"] + s2["iowait"]
 
-        # while the rest of stats count as non-idle times, so we add them all together
+        # non-idle = everything else summed together
         non_idle1 = s1["user"] + s1["nice"] + s1["system"] + s1["irq"] + s1["softirq"] + s1["steal"]
         non_idle2 = s2["user"] + s2["nice"] + s2["system"] + s2["irq"] + s2["softirq"] + s2["steal"]
 
-        total1 = idle1 + non_idle1
-        total2 = idle2 + non_idle2
-
-        delta_total = total2 - total1
+        delta_total = (idle2 + non_idle2) - (idle1 + non_idle1)
         delta_idle = idle2 - idle1
 
         if delta_total > 0:
-            usage = ((delta_total - delta_idle) / delta_total) * 100
-            percentages[cpu] = round(usage, 2)
+            percentages[cpu] = round(((delta_total - delta_idle) / delta_total) * 100, 2)
         else:
             percentages[cpu] = 0.0
 
     return percentages
 
-def read_memory_stats() -> dict[str,int]:
-    """Parse /proc/meminfo to extract total, available, used memory.Each line is: 'FieldName: value kB'"""
-    memStats = {}
+
+# ─────────────────────────────────────────────
+# Memory
+# ─────────────────────────────────────────────
+
+def read_memory_stats() -> dict[str, int | float]:
+    """
+    Parse /proc/meminfo to extract total, available, and used memory.
+    /proc/meminfo reflects current state (not cumulative), so no delta needed.
+    Each line format: 'FieldName:   value kB'
+    """
+    mem = {}
 
     path = Path("/proc/meminfo")
     with path.open("r") as file:
-        for f in file:
-            parts = f.split() #split on spaces
+        for line in file:
+            parts = line.split()
             if len(parts) >= 2:
-                key = parts[0].rstrip(":") # we split the name of the mem stat and store it in key using right strip
-                memStats[key] = int(parts[1]) # then in the dict use key as the key and stats as the val for the dict
+                key = parts[0].rstrip(":") # strip trailing colon from field name
+                mem[key] = int(parts[1]) # value is always in kB
 
-    totalMemory = memStats.get("MemTotal", 0) # we use exact names MemTotal to get the value from the dictionary (avoids crashing if we use .get)
-    AvailableMemory = memStats.get("MemAvailable", 0)
+    total = mem.get("MemTotal", 0)
+    available = mem.get("MemAvailable", 0)
 
     return {
-    "total_mb": totalMemory // 1024,
-    "available_mb": AvailableMemory // 1024,
-    "used_mb": (totalMemory - AvailableMemory) // 1024,
-    "used_percent": round((totalMemory - AvailableMemory) / totalMemory * 100, 2),
+        "total_mb":     total // 1024,
+        "available_mb": available // 1024,
+        "used_mb":      (total - available) // 1024,
+        "used_percent": round((total - available) / total * 100, 2),
     }
 
 
-def read_disk_stats(interval: float = 1.0) -> dict[str, dict[str, float]]:
-    """ Parse /proc/diskstats to get disk read/write throughput in MB/s. Only tracks physical devices (sda, nvme0n1, vda) — skips partitions.
-    Same delta pattern as CPU: two snapshots, measure difference over interval."""
+# ─────────────────────────────────────────────
+# Disk
+# ─────────────────────────────────────────────
 
-    SECTOR_SIZE = 512  # bytes, fixed on Linux
+def _get_disk_snapshot() -> dict[str, dict[str, int]]:
+    """
+    Raw single read of /proc/diskstats.
+    Skips partitions (sda1, nvme0n1p1, etc.) — only tracks physical devices.
+    Extracted as a top-level function so collect_snapshot() controls the sleep.
+    """
+    stats = {}
+    path = Path("/proc/diskstats")
 
-    def _snapshot() -> dict[str, dict[str, int]]:
-        stats = {}
-        path = Path("/proc/diskstats")
-        with path.open("r") as file:
-            for line in file:
-                parts = line.split()
-                device = parts[2]
-                # Skip partitions (sda1, sda2, nvme0n1p1 etc.) Physical devices don't end in a digit after a letter pattern
-                if device[-1].isdigit() and not device.endswith("0"):
-                    continue
-                stats[device] = {
-                    "sectors_read": int(parts[5]), # similar logic as other readers, use device as key and read/writtem sectors as the values
-                    "sectors_written": int(parts[9]),
-                }
-        return stats
+    with path.open("r") as file:
+        for line in file:
+            parts = line.split()
+            device = parts[2]
 
-    first = _snapshot() # again, we use 2 snapshots as linux stats count starting from when the system is booted, so to calculate the rate we need to find the difference between 2 snaps and then calc the rate 
+            # partitions end in a digit but are not the base device (e.g. nvme0n1)
+            if device[-1].isdigit() and not device.endswith("0"):
+                continue
+
+            stats[device] = {
+                "sectors_read":    int(parts[5]),
+                "sectors_written": int(parts[9]),
+            }
+
+    return stats
+
+
+# ─────────────────────────────────────────────
+# Network
+# ─────────────────────────────────────────────
+
+def _get_net_snapshot() -> dict[str, dict[str, int]]:
+    """
+    Raw single read of /proc/net/dev.
+    Skips loopback (lo). Bytes are cumulative since boot — delta needed for rates.
+    Extracted as a top-level function so collect_snapshot() controls the sleep.
+    """
+    stats = {}
+    path = Path("/proc/net/dev")
+
+    with path.open("r") as file:
+        for line in file:
+            line = line.strip()
+            if ":" not in line: # skip the two header lines
+                continue
+
+            interface, data = line.split(":", 1)
+            interface = interface.strip()
+
+            if interface == "lo": # loopback is not useful to monitor
+                continue
+
+            parts = data.split()
+            stats[interface] = {
+                "bytes_recv": int(parts[0]), # receive bytes at index 0
+                "bytes_sent": int(parts[8]), # transmit bytes at index 8
+            }
+
+    return stats
+
+
+# ─────────────────────────────────────────────
+# Unified snapshot
+# ─────────────────────────────────────────────
+
+def collect_snapshot(interval: float = 1.0) -> dict:
+    """
+    Collect a single structured snapshot of current system state.
+    All three delta-based metrics share one sleep — avoids 3x the wait time
+    if each reader slept independently.
+    This dict is what eventually gets written to the ring buffer and TimescaleDB.
+    """
+    SECTOR_SIZE = 512  # bytes per sector, fixed on Linux
+
+    # ── first snapshots (all taken before the sleep) ──
+    cpu_first  = get_raw_ticks()
+    disk_first = _get_disk_snapshot()
+    net_first  = _get_net_snapshot()
+
     time.sleep(interval)
-    second = _snapshot()
 
-    result = {}
-    for device in first:
-        if device not in second:
+    # ── second snapshots ──
+    cpu_second  = get_raw_ticks()
+    disk_second = _get_disk_snapshot()
+    net_second  = _get_net_snapshot()
+
+    # ── CPU: compute usage % from tick deltas ──
+    cpu_result = {}
+    for cpu in cpu_first:
+        if cpu not in cpu_second:
             continue
-        sectors_read_delta = second[device]["sectors_read"] - first[device]["sectors_read"]
-        sectors_written_delta = second[device]["sectors_written"] - first[device]["sectors_written"]
-        result[device] = {
-            "read_mb_per_s": round((sectors_read_delta * SECTOR_SIZE) / (1024 ** 2) / interval, 3),
-            "write_mb_per_s": round((sectors_written_delta * SECTOR_SIZE) / (1024 ** 2) / interval, 3),
+        s1, s2 = cpu_first[cpu], cpu_second[cpu]
+        idle1    = s1["idle"] + s1["iowait"]
+        idle2    = s2["idle"] + s2["iowait"]
+        non_idle1 = s1["user"] + s1["nice"] + s1["system"] + s1["irq"] + s1["softirq"] + s1["steal"]
+        non_idle2 = s2["user"] + s2["nice"] + s2["system"] + s2["irq"] + s2["softirq"] + s2["steal"]
+        delta_total = (idle2 + non_idle2) - (idle1 + non_idle1)
+        delta_idle  = idle2 - idle1
+        cpu_result[cpu] = round(((delta_total - delta_idle) / delta_total) * 100, 2) if delta_total > 0 else 0.0
+
+    # ── Disk: convert sector deltas to MB/s ──
+    disk_result = {}
+    for device in disk_first:
+        if device not in disk_second:
+            continue
+        read_delta  = disk_second[device]["sectors_read"]    - disk_first[device]["sectors_read"]
+        write_delta = disk_second[device]["sectors_written"] - disk_first[device]["sectors_written"]
+        disk_result[device] = {
+            "read_mb_per_s":  round((read_delta  * SECTOR_SIZE) / (1024 ** 2) / interval, 3),
+            "write_mb_per_s": round((write_delta * SECTOR_SIZE) / (1024 ** 2) / interval, 3),
         }
-    return result
 
-def read_network_stats(interval: float = 1.0) -> dict[str, dict[str, float]]: # same parameters as cpu reader
-    """
-    Parse /proc/net/dev to get network throughput in KB/s per interface.
-    Skips loopback (lo). Same delta pattern as CPU and disk.
-    """
-
-    def _snapshot() -> dict[str, dict[str, int]]: # nested function
-        stats = {}
-        path = Path("/proc/net/dev") # the path for where the contents are stored
-        with path.open("r") as file:
-            for line in file:
-                line = line.strip()
-                if ":" not in line:  # skip header lines
-                    continue
-                interface, data = line.split(":", 1) # split the line and store into parts
-                interface = interface.strip()
-                if interface == "lo":  # skip loopback
-                    continue
-                parts = data.split()
-                stats[interface] = { # for a specific interface we store the recieved and sent bytes 
-                    "bytes_recv": int(parts[0]),
-                    "bytes_sent": int(parts[8]),
-                }
-        return stats
-
-    first = _snapshot()
-    time.sleep(interval)
-    second = _snapshot()
-
-    result = {}
-    for iface in first:
-        if iface not in second: # we need to make sure that they exist in both the first and the second chunk
+    # ── Network: convert byte deltas to KB/s ──
+    net_result = {}
+    for iface in net_first:
+        if iface not in net_second:
             continue
-        recv_delta = second[iface]["bytes_recv"] - first[iface]["bytes_recv"] # for rec we need to find the diff 
-        sent_delta = second[iface]["bytes_sent"] - first[iface]["bytes_sent"]
-        result[iface] = {
-            "recv_kb_per_s": round(recv_delta / 1024 / interval, 3), # we convert the rec/sent into kb/s
+        recv_delta = net_second[iface]["bytes_recv"] - net_first[iface]["bytes_recv"]
+        sent_delta = net_second[iface]["bytes_sent"] - net_first[iface]["bytes_sent"]
+        net_result[iface] = {
+            "recv_kb_per_s": round(recv_delta / 1024 / interval, 3),
             "sent_kb_per_s": round(sent_delta / 1024 / interval, 3),
         }
-    return result # then return the result
 
-def collect_snapshot() -> dict:
-    """Returns a single structured snapshot of current system state.This is what eventually gets written to the ring buffer and then TimescaleDB."""
     return {
         "timestamp": time.time(),
-        "cpu": read_cpu_stats(),
-        "memory": read_memory_stats(),
+        "cpu":       cpu_result,
+        "memory":    read_memory_stats(), # current state — no delta needed
+        "disk":      disk_result,
+        "network":   net_result,
     }
 
 
 if __name__ == "__main__":
+    print("Collecting snapshot...")
     snapshot = collect_snapshot()
     print(json.dumps(snapshot, indent=2))
