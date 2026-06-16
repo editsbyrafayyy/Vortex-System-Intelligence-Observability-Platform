@@ -89,6 +89,44 @@ def read_memory_stats() -> dict[str,int]:
     }
 
 
+def read_disk_stats(interval: float = 1.0) -> dict[str, dict[str, float]]:
+    """ Parse /proc/diskstats to get disk read/write throughput in MB/s. Only tracks physical devices (sda, nvme0n1, vda) — skips partitions.
+    Same delta pattern as CPU: two snapshots, measure difference over interval."""
+
+    SECTOR_SIZE = 512  # bytes, fixed on Linux
+
+    def _snapshot() -> dict[str, dict[str, int]]:
+        stats = {}
+        path = Path("/proc/diskstats")
+        with path.open("r") as file:
+            for line in file:
+                parts = line.split()
+                device = parts[2]
+                # Skip partitions (sda1, sda2, nvme0n1p1 etc.) Physical devices don't end in a digit after a letter pattern
+                if device[-1].isdigit() and not device.endswith("0"):
+                    continue
+                stats[device] = {
+                    "sectors_read": int(parts[5]), # similar logic as other readers, use device as key and read/writtem sectors as the values
+                    "sectors_written": int(parts[9]),
+                }
+        return stats
+
+    first = _snapshot() # again, we use 2 snapshots as linux stats count starting from when the system is booted, so to calculate the rate we need to find the difference between 2 snaps and then calc the rate 
+    time.sleep(interval)
+    second = _snapshot()
+
+    result = {}
+    for device in first:
+        if device not in second:
+            continue
+        sectors_read_delta = second[device]["sectors_read"] - first[device]["sectors_read"]
+        sectors_written_delta = second[device]["sectors_written"] - first[device]["sectors_written"]
+        result[device] = {
+            "read_mb_per_s": round((sectors_read_delta * SECTOR_SIZE) / (1024 ** 2) / interval, 3),
+            "write_mb_per_s": round((sectors_written_delta * SECTOR_SIZE) / (1024 ** 2) / interval, 3),
+        }
+    return result
+
 def read_network_stats(interval: float = 1.0) -> dict[str, dict[str, float]]: # same parameters as cpu reader
     """
     Parse /proc/net/dev to get network throughput in KB/s per interface.
