@@ -89,6 +89,47 @@ def read_memory_stats() -> dict[str,int]:
     }
 
 
+def read_network_stats(interval: float = 1.0) -> dict[str, dict[str, float]]: # same parameters as cpu reader
+    """
+    Parse /proc/net/dev to get network throughput in KB/s per interface.
+    Skips loopback (lo). Same delta pattern as CPU and disk.
+    """
+
+    def _snapshot() -> dict[str, dict[str, int]]: # nested function
+        stats = {}
+        path = Path("/proc/net/dev") # the path for where the contents are stored
+        with path.open("r") as file:
+            for line in file:
+                line = line.strip()
+                if ":" not in line:  # skip header lines
+                    continue
+                interface, data = line.split(":", 1) # split the line and store into parts
+                interface = interface.strip()
+                if interface == "lo":  # skip loopback
+                    continue
+                parts = data.split()
+                stats[interface] = { # for a specific interface we store the recieved and sent bytes 
+                    "bytes_recv": int(parts[0]),
+                    "bytes_sent": int(parts[8]),
+                }
+        return stats
+
+    first = _snapshot()
+    time.sleep(interval)
+    second = _snapshot()
+
+    result = {}
+    for iface in first:
+        if iface not in second: # we need to make sure that they exist in both the first and the second chunk
+            continue
+        recv_delta = second[iface]["bytes_recv"] - first[iface]["bytes_recv"] # for rec we need to find the diff 
+        sent_delta = second[iface]["bytes_sent"] - first[iface]["bytes_sent"]
+        result[iface] = {
+            "recv_kb_per_s": round(recv_delta / 1024 / interval, 3), # we convert the rec/sent into kb/s
+            "sent_kb_per_s": round(sent_delta / 1024 / interval, 3),
+        }
+    return result # then return the result
+
 def collect_snapshot() -> dict:
     """Returns a single structured snapshot of current system state.This is what eventually gets written to the ring buffer and then TimescaleDB."""
     return {
