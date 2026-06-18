@@ -4,8 +4,6 @@
 
 A self-hosted, privacy-first monitoring platform for Linux machines. Vortex collects system metrics (CPU, memory, disk, network, processes, Docker containers), stores them in a time-series database, detects anomalies, and surfaces everything through a live web dashboard.
 
-> Built as a portfolio project to demonstrate system design, data structures, and backend engineering — while being genuinely useful as a daily-use tool.
-
 ---
 
 ## Features
