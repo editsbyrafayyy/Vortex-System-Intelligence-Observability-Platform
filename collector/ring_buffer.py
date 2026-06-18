@@ -39,3 +39,16 @@ class RingBuffer: # ring buffer
  
         if self._size < self._capacity: # Only increment size until we've filled every slot once.
             self._size += 1
+
+     def list_output(self) -> list[dict]:
+     	if self.size == 0:
+     		return []
+
+     	if self.size < self._capacity:
+     		return list(self._slots[: self._size]) # return buffer content from 0 to where the head - 1 is (size = head here)
+
+     	return self._slots[self._head :] + self._slots[: self._head] 
+     	''' this last case deals with the circular part of the buffer, the first part [self._head :] means grab everything old till the end
+     	of right end of queue, and the [: self._head] parts refers to the newly added elements
+     	example: [Data4, Data5, Data1, Data2, Data3], here ._head is on Data1 so the first part means Data1-3 then the remaining Data4 and Data5'''
+
