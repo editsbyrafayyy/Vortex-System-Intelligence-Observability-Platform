@@ -42,10 +42,10 @@ class RingBuffer: # ring buffer
             self._size += 1
 
     def list_output(self) -> list[dict]:
-        if self.size == 0:
+        if self._size == 0:
             return []
 
-        if self.size < self._capacity:
+        if self._size < self._capacity:
             return list(self._slots[: self._size]) # return buffer content from 0 to where the head - 1 is (size = head here)
 
         return self._slots[self._head :] + self._slots[: self._head] 
@@ -70,3 +70,19 @@ class RingBuffer: # ring buffer
         self._slots = [None] * self._capacity
         self._head = 0
         self._size = 0
+
+    def __len__(self) -> int:
+        """len(buffer) returns the number of snapshots currently stored."""
+        return self._size
+ 
+    def __iter__(self) -> Iterator[dict]:
+        """Allows: for snapshot in buffer — iterates oldest to newest."""
+        return iter(self.list_output())
+ 
+    def __repr__(self) -> str:
+        return (
+            f"RingBuffer(capacity={self._capacity}, "
+            f"size={self._size}, "
+            f"is_full={self.is_full()})"
+        )
+ 
