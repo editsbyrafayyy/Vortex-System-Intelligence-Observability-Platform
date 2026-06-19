@@ -1,0 +1,80 @@
+services:
+
+  # ── TimescaleDB (Postgres + time-series extension) ─────────────────────────
+  #Timescaledb is optimal for this use case as the data that is being parsed heavily relies on time as an element that will be queried. It breaks the data into chunks (hypertables) that can be accessed with ease when queried, compared to Postgres which would need to load all the tables and then filter accordingly. Timescaledb would just load that specific chunk that is needed.
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: vortex_timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB}
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./infra/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro   # runs once on first boot
+    ports:
+      - "127.0.0.1:5432:5432"   # localhost only — not exposed to the network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Redis (cache + Streams queue) ─────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: vortex_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes   # AOF persistence — survives restarts
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"   # localhost only
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Agent (collector → Redis Stream) ──────────────────────────────────────
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    container_name: vortex_agent
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL:          redis://redis:6379
+      AGENT_SECRET:       ${AGENT_SECRET}
+      COLLECTOR_INTERVAL: ${COLLECTOR_INTERVAL:-5}
+      HOST_ID:            ${HOST_ID:-local}
+    # /proc is read-only on the host — agent needs it to collect system metrics
+    volumes:
+      - /proc:/host/proc:ro
+    pid: host   # share host PID namespace so /proc/<pid>/stat reads are accurate
+
+  # ── Worker (Redis Stream → TimescaleDB) ───────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: vortex_worker
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    environment:
+      REDIS_URL:     redis://redis:6379
+      AGENT_SECRET:  ${AGENT_SECRET}
+      DATABASE_URL:  postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}
+
+volumes:
+  timescaledb_data:
+  redis_data:

@@ -6,4 +6,4 @@ __pycache__/
 01-PRD.md
 02-Technical-Design.md
 03-Roadmap.md
-proc_reader.py
+concepts/
