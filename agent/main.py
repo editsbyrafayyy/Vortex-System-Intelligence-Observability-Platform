@@ -55,6 +55,42 @@ def connect_redis() -> redis.Redis:
 	log.error("could not connect to redis after 10 tries: %s", last_error)
 	sys.exit(1)
 
-def run(client: redi)
+def run(client: redis.Redis) -> None:
+    log.info(
+        "agent_id=%s host_id=%s interval=%ss — starting collection loop",
+        AGENT_ID, HOST_ID, COLLECTOR_INTERVAL,
+    )
+    while True:
+        try:
+            snapshot = collect_snapshot(interval=COLLECTOR_INTERVAL)
+            metrics = flatten_snapshot(snapshot)
+ 
+            if not metrics:
+                log.warning("snapshot produced zero metrics — skipping push")
+                continue
+ 
+            message = build_message(metrics)
+ 
+            # Redis Streams fields must be strings — the payload is JSON-encoded
+            # under a single field rather than spread across many fields, since
+            # the structure is nested (metrics is a list of dicts).
+            message_id = client.xadd(STREAM_NAME, {"payload": json.dumps(message)}) # adding the 
+ 
+            log.info(
+                "pushed %d metrics → %s (id=%s)",
+                len(metrics), STREAM_NAME, message_id,
+            )
+ 
+        except redis.exceptions.ConnectionError as exc:
+            # Redis dropped mid-run (e.g. worker/redis restarted). Don't crash —
+            log.error("lost connection to redis, will retry: %s", exc)
+            time.sleep(2)
+
+def main() -> None:
+    client = connect_redis()
+    run(client)
+ 
+if __name__ == "__main__":
+    main()
 
 
