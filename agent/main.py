@@ -8,7 +8,7 @@ import sys
 import redis
 
 from collector import collect_snapshot
-from .transfrom import flatten_snapshot
+from .transform import flatten_snapshot
 
 logging.basicConfig(
 	level = logging.INFO,

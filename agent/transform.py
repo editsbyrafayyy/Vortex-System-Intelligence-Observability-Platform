@@ -1,24 +1,26 @@
-from typing import Any
-
 """
 Converts the nested dict returned by collector.collect_snapshot() into the
 flat list of {metric_type, pid, value, unit, metadata} entries required by
 the agent/server message contract.
 """
-def flatten_snapshot(snapshot, dict[str, Any]) -> list[dict[str, Any]]:
-	# cpu stats extract per core (percentage)
-	for core_labels, percent in snapshot.get("cpu", {}).items():
-		metrics.append({
+from typing import Any
+
+def flatten_snapshot(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    metrics = []
+
+    # cpu stats extract per core (percentage)
+    for core_label, percent in snapshot.get("cpu", {}).items():
+        metrics.append({
             "metric_type": "cpu",
             "pid": None,
             "value": percent,
             "unit": "percent",
             "metadata": {"core": core_label},
-			})
+        })
 
-	# memory stats (in percentage/mb)
-	for key, value in snapshot.get("memory", {}).items():
-		unit = "percent" if key == "used_percent" else "mb"
+    # memory stats (in percentage/mb)
+    for key, value in snapshot.get("memory", {}).items():
+        unit = "percent" if key == "used_percent" else "mb"
         metrics.append({
             "metric_type": "memory",
             "pid": None,
@@ -27,10 +29,10 @@ def flatten_snapshot(snapshot, dict[str, Any]) -> list[dict[str, Any]]:
             "metadata": {"field": key},
         })
 
-    #disk stats
+    # disk stats
     for device, rates in snapshot.get("disk", {}).items():
-		# for read mb/s
-		metrics.append({
+        # for read mb/s
+        metrics.append({
             "metric_type": "disk_io",
             "pid": None,
             "value": rates["read_mb_per_s"],
@@ -56,7 +58,7 @@ def flatten_snapshot(snapshot, dict[str, Any]) -> list[dict[str, Any]]:
             "unit": "kb_per_s",
             "metadata": {"interface": iface, "direction": "recv"},
         })
-        #sent kb/s
+        # sent kb/s
         metrics.append({
             "metric_type": "net_io",
             "pid": None,
@@ -66,7 +68,7 @@ def flatten_snapshot(snapshot, dict[str, Any]) -> list[dict[str, Any]]:
         })
 
     # processes
-	for proc in snapshot.get("processes", []):
+    for proc in snapshot.get("processes", []):
         metrics.append({
             "metric_type": "process",
             "pid": proc["pid"],
@@ -77,5 +79,5 @@ def flatten_snapshot(snapshot, dict[str, Any]) -> list[dict[str, Any]]:
                 "memory_mb": proc["memory_mb"],
             },
         })
- 
+
     return metrics
