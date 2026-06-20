@@ -3,6 +3,7 @@ import json
 import logging
 import uuid
 import time
+import sys
 
 import redis
 
@@ -18,14 +19,15 @@ log = logging.getLogger("agent")
 
 STREAM_NAME = "metrics:ingest"
 SCHEMA_VERSION = 1
-
-REDIS_URL = os.environ["AGENT_SECRET"]
+ 
+REDIS_URL = os.environ["REDIS_URL"] # fail if missing
+AGENT_SECRET = os.environ["AGENT_SECRET"]
 HOST_ID = os.environ.get("HOST_ID", "local")
 COLLECTOR_INTERVAL = float(os.environ.get("COLLECTOR_INTERVAL", 5))
 
 AGENT_ID = str(uuid.uuid4()) # per process identity
 
-"""Wrap a flat metrics list in the versioned envelope from the doc."""
+""" Wrap a flat metrics list in the versioned envelope from the doc."""
 def build_message(metrics: list[dict]) -> dict:
     return {
         "schema_version": SCHEMA_VERSION,
@@ -57,7 +59,7 @@ def connect_redis() -> redis.Redis:
 
 def run(client: redis.Redis) -> None:
     log.info(
-        "agent_id=%s host_id=%s interval=%ss — starting collection loop",
+        "agent_id=%s host_id=%s interval=%ss , starting collection loop",
         AGENT_ID, HOST_ID, COLLECTOR_INTERVAL,
     )
     while True:
@@ -66,14 +68,11 @@ def run(client: redis.Redis) -> None:
             metrics = flatten_snapshot(snapshot)
  
             if not metrics:
-                log.warning("snapshot produced zero metrics — skipping push")
+                log.warning("snapshot produced zero metrics, skipping push")
                 continue
  
             message = build_message(metrics)
- 
-            # Redis Streams fields must be strings — the payload is JSON-encoded
-            # under a single field rather than spread across many fields, since
-            # the structure is nested (metrics is a list of dicts).
+ 			# redis uses json strings instead of lists, so we convert the list of dict into one
             message_id = client.xadd(STREAM_NAME, {"payload": json.dumps(message)}) # adding the 
  
             log.info(
@@ -92,5 +91,3 @@ def main() -> None:
  
 if __name__ == "__main__":
     main()
-
-
