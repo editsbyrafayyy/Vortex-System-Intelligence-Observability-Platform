@@ -14,13 +14,15 @@ Crash/restart recovery:
   crashed run via XAUTOCLAIM before entering the normal loop.
 """
 
-import asyncio
-import json
+import asyncio  # a single threat that switches between tasks whenever one is waiting on I/O (redis read. DB write), without this threads/processes to handle concurrent
+# I/O would be needed, this gives cooperative concurrency in a single thread (lighter and easier to reason about for I/O heavy workloads)
+import json 
 import logging
 import os
-import signal
+import signal  # allows the workder to respond to OS signals (SIGTERM - docker stop sends this) and SIGNIT (Ctrl + C command), without this docker stop gives
+# up the container within 10 seconds, and any messages in the redis stream being written would be lost mid-insert.
 
-import redis.asyncio as aioredis
+import redis.asyncio as aioredis  # this is the offical redis python client, but this works asynchronously, the agent was using the sync varient for reference.
 from pydantic import ValidationError
 
 from agent.schemas import MetricPayload
@@ -28,14 +30,15 @@ from worker.db import create_timescale_pool, init_sqlite, write_metrics
 
 log = logging.getLogger(__name__)
 
+# These are all module level constraints, 
 STREAM_NAME = "metrics:ingest"
 GROUP_NAME = "vortex-workers"
 CONSUMER_ID = os.getenv("WORKER_ID", "worker-1")
-BLOCK_MS = 2_000   # how long XREADGROUP blocks waiting for new messages
-BATCH_SIZE = 50  # max messages claimed per read
+BLOCK_MS = 2_000   # how long XREADGROUP blocks waiting for new messages (2 seconds)
+BATCH_SIZE = 50  # max messages claimed per read, issue is that if the worker crashes mid batch, all the messages go back to pending.
 CLAIM_IDLE_MS = 30_000  # ms a message must be pending bfr XAUTOCLAIM reclaim
 
-AGENT_SECRET = os.environ["AGENT_SECRET"]   # must match agent's env var
+AGENT_SECRET = os.environ["AGENT_SECRET"]   # must match agent's env var, if not the worker crashes right away as that would be security issue (no auth validation)
 
 
 # =============================================================================
