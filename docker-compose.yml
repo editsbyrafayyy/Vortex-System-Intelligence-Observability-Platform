@@ -73,8 +73,13 @@ services:
     environment:
       REDIS_URL:     redis://redis:6379
       AGENT_SECRET:  ${AGENT_SECRET}
-      DATABASE_URL:  postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}
+      TIMESCALE_DSN:  postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}
+      SQLITE_PATH:    /app/vortex.db
+      WORKER_ID:      worker-1
+    volumes:               
+      - sqlite_data:/app        
 
 volumes:
   timescaledb_data:
   redis_data:
+  sqlite_data:

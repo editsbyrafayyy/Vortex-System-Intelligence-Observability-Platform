@@ -40,11 +40,11 @@ CLAIM_IDLE_MS = 30_000  # ms a message must be pending bfr XAUTOCLAIM reclaim
 
 AGENT_SECRET = os.environ["AGENT_SECRET"]   # must match agent's env var, if not the worker crashes right away as that would be security issue (no auth validation)
 
+''' A redis stream is just a log but it contains bookmarks to ensure that the reader only sees the messages that have not been read. The consumer group gives the
+stream a bookmark per group, so redis tracks all the messsages that have been delivered and which have only been ack-ed, only the messages that have not beem
+delivered are sent to the consumer group '''
 
-# =============================================================================
-# Consumer group bootstrap
-# =============================================================================
-
+#   
 async def ensure_consumer_group(r: aioredis.Redis) -> None:
     """
     Create the consumer group if it doesn't already exist.
